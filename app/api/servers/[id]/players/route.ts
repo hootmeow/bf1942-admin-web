@@ -1,8 +1,15 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
+import { getManager } from '@/lib/process/registry'
 
-// TODO: fetch live player list from RCON daemon once protocol is implemented
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await params
-  return NextResponse.json([])
+  const { id } = await params
+  const mgr = getManager(parseInt(id))
+
+  if (!mgr?.isRunning) {
+    return NextResponse.json([])
+  }
+
+  const players = await mgr.requestPlayerList()
+  return NextResponse.json(players)
 }

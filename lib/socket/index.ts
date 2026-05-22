@@ -1,7 +1,9 @@
 import type { Server as HttpServer } from 'http'
 import { Server as SocketIOServer } from 'socket.io'
-import type { ServerToClientEvents, ClientToServerEvents } from '@/types/socket'
-import { connectServer } from '@/lib/rcon/registry'
+import type { ServerToClientEvents, ClientToServerEvents, ProcessStatus } from '@/types/socket'
+import { db } from '@/lib/db/index'
+import { ensureManager } from '@/lib/process/registry'
+import type { RconPlayer } from '@/lib/rcon/types'
 
 type IO = SocketIOServer<ClientToServerEvents, ServerToClientEvents>
 
@@ -21,11 +23,20 @@ export function initSocketServer(httpServer: HttpServer): IO {
   io.on('connection', (socket) => {
     socket.on('join-server', async (serverId) => {
       socket.join(`server:${serverId}`)
-      // Trigger RCON connection for this server if not already up
+
       try {
-        await connectServer(parseInt(serverId))
+        const id = parseInt(serverId)
+        const server = await db.server.findUnique({
+          where: { id },
+          select: { binaryPath: true, gameDir: true },
+        })
+        if (server) {
+          const mgr = await ensureManager(id)
+          // Send current status immediately to the joining client
+          socket.emit('process-status', mgr.getStatus())
+        }
       } catch (err) {
-        console.error(`[Socket] Failed to connect RCON for server ${serverId}:`, (err as Error).message)
+        console.error(`[Socket] Error attaching manager for server ${serverId}:`, (err as Error).message)
       }
     })
 
@@ -43,12 +54,13 @@ export function getIO(): IO {
 }
 
 export function broadcastConsoleLine(serverId: number, line: string): void {
-  getIO().to(`server:${serverId}`).emit('console-line', line)
+  try { getIO().to(`server:${serverId}`).emit('console-line', line) } catch {}
 }
 
-export function broadcastPlayers(
-  serverId: number,
-  players: Parameters<ServerToClientEvents['players-update']>[0],
-): void {
-  getIO().to(`server:${serverId}`).emit('players-update', players)
+export function broadcastPlayers(serverId: number, players: RconPlayer[]): void {
+  try { getIO().to(`server:${serverId}`).emit('players-update', players) } catch {}
+}
+
+export function broadcastProcessStatus(serverId: number, status: ProcessStatus): void {
+  try { getIO().to(`server:${serverId}`).emit('process-status', status) } catch {}
 }

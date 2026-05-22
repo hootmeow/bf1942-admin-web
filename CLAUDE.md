@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Modern web-based successor to Blackbagops' BFSRM — an admin dashboard for Battlefield 1942 game servers. Replaces the legacy Windows desktop client with a responsive, browser-accessible interface.
 
-**Hosting constraint:** must run on a self-hosted VPS (OVHcloud / DigitalOcean). Serverless platforms (Vercel) are incompatible — the backend requires persistent TCP sockets to game servers.
+**Hosting constraint:** must run on a self-hosted VPS (OVHcloud / DigitalOcean). Serverless platforms (Vercel) are incompatible — the backend requires persistent TCP sockets and child process management.
+
+**Co-location constraint:** the admin panel MUST run on the same server as BF1942. It manages the game process directly via `child_process.spawn()` — not RCON.
 
 ## Commands
 
@@ -44,35 +46,56 @@ Key routes:
 - `/` → redirect based on auth
 - `/login` → login form
 - `/dashboard` → server list (server component, Prisma)
-- `/servers/[id]` → server detail (tabs: Console, Players, Map Rotation, Settings)
+- `/servers/[id]` → server detail (tabs: Console, Players, Map Rotation, Bans, Settings)
 
-API routes (`app/api/`) handle: auth (login/logout), command dispatch, player list. All mutating commands write to the `AuditLog` table before attempting execution.
+API routes (`app/api/`) handle: auth (login/logout), command dispatch, player list, start/stop/restart, message broadcast, server settings, map rotation, ban management.
 
 ### 3. Socket.io server (`lib/socket/index.ts`)
-Clients join a room per server: `server:{id}`. The RCON daemon (not yet implemented) will call `broadcastConsoleLine()` and `broadcastPlayers()` from `lib/socket/index.ts` when events arrive from the game server.
+Clients join a room per server: `server:{id}`. The process manager calls broadcast functions when events arrive.
 
-## BF1942 RCON Protocol (`lib/rcon/`)
+Events emitted to clients:
+- `console-line` — raw stdout line from BF1942
+- `players-update` — RconPlayer[] from game.listPlayers response
+- `process-status` — { running, pid, map, playerCount }
 
-Source: CVE-2003-1355 disclosure + icculus.org BF1942 mailing list (Feb 2003). **No Wireshark capture needed** — the protocol is fully implemented.
+## BF1942 Process Management (`lib/process/`)
 
-**Wire protocol (TCP, port 4711 by default):**
-1. Server → Client: 10-byte XOR key
-2. Client → Server: `uint32LE(usernameLen)` + `xor(username, key)` + `uint32LE(passwordLen)` + `xor(password, key)`
-3. Server → Client: `0x01` = success, anything else = failure
-4. Post-auth: plain text, newline-delimited. Every server console line arrives prefixed with `#`.
-5. Commands are raw console commands: `admin.kickPlayer 1\n`, `game.listPlayers\n`, etc.
-
-**Username/password constraint:** must be pure alphanumeric — all-letters OR all-digits. No mixed, no spaces. Server rejects with "Unauthorized".
-
-**Known server bug:** enabling remote console causes the server to hang on map changes. The registry reconnects automatically after disconnect.
+The admin panel manages the BF1942 dedicated server as a child process via stdin/stdout.
 
 **Files:**
-- `lib/rcon/types.ts` — TypeScript interfaces (`RconPlayer`, `ParsedConsoleEvent`, etc.)
-- `lib/rcon/client.ts` — `BF1942RconClient` (EventEmitter). Emits: `authenticated`, `console`, `players`, `error`, `disconnect`
-- `lib/rcon/parser.ts` — `parsePlayerList()` and `parseConsoleEvent()`. **The player list regex is a best-effort guess — test against a real server and adjust if it returns empty.**
-- `lib/rcon/registry.ts` — One client per server ID. Auto-reconnect with exponential backoff. Polls player list every 10s. Called by `lib/socket/index.ts` when a browser joins a server room.
+- `lib/process/manager.ts` — `BF1942ProcessManager` (EventEmitter). Spawns and manages the server process. Methods: `start()`, `stop()`, `restart()`, `sendCommand()`, `requestPlayerList()`. Same event interface as the old RCON client for socket layer compatibility.
+- `lib/process/registry.ts` — One manager per server ID. Lazy-creates managers when a browser joins. `startServer()`, `stopServer()`, `restartServer()` for lifecycle management.
+- `lib/process/settings.ts` — Read/write `.con` config files (`serversettings.con`, `maplist.con`, `serverbanlist.con`).
 
-**What still needs a real server to verify:** the exact column layout of `game.listPlayers` output. If `requestPlayerList()` returns `[]` on a live server, add a temporary `console.log` to `drainTextLines()` to see the raw lines, then fix the regexes in `parser.ts`.
+**Config file paths (derived from `gameDir`):**
+- Settings: `{gameDir}/mods/bf1942/settings/serversettings.con`
+- Map list: `{gameDir}/mods/bf1942/settings/maplist.con`
+- Ban list: `{gameDir}/mods/bf1942/settings/serverbanlist.con`
+
+**BF1942 stdin commands (sent via `sendCommand()`):**
+- `game.listPlayers` — list players (output collected from stdout)
+- `admin.kickPlayer <slot>` — kick player
+- `admin.banPlayerKey <slot>` — ban by CD key
+- `admin.banPlayerIp <slot>` — ban by IP
+- `admin.removeKeyBan <key>` — unban by key
+- `admin.removeIpBan <ip>` — unban by IP
+- `admin.sendTextMessage "text"` — broadcast server message
+- `admin.runNextLevel` — force next map
+- `admin.restartMap` — restart current map
+- `game.setNextLevel "<mapname>"` — set next map
+
+**Player list format** (from game.listPlayers stdout):
+```
+Player 0 "PlayerName" 0 1 45 100 abc123def 1 0
+# fields: slot "name" isBot teamId ping score cdKeyHash isAlive isJoining
+```
+
+**Known issue:** BF1942 process output goes to both stdout and stderr. The manager reads both.
+
+**Map IDs (BF1942 level folder names):**
+`BattleOfBritain`, `Battleaxe`, `Berlin`, `Bocage`, `CoralSea`, `ElAlamein`, `Gazala`,
+`Guadalcanal`, `IwoJima`, `Kharkov`, `Kursk`, `LiberationOfCaen`, `MarketGarden`,
+`Midway`, `OmahaBeach`, `OperationAberdeen`, `OperationOverlord`, `Stalingrad`, `Tobruk`
 
 ## Database
 
@@ -80,7 +103,10 @@ Prisma + SQLite (dev) / PostgreSQL (prod — change `provider` in `prisma/schema
 
 Models: `User`, `Server`, `MapRotation`, `Ban`, `AuditLog`.
 
-Every admin action (kick, ban, map change, exec) must be written to `AuditLog` — see `app/api/servers/[id]/command/route.ts` for the pattern.
+`Server` fields: `name`, `host`, `port`, `binaryPath`, `gameDir` (no RCON fields).
+`Ban` fields include `banType` ("key" or "ip"), `ipAddress` (nullable).
+
+Every admin action (kick, ban, map change, exec, start/stop/restart) must be written to `AuditLog`.
 
 ## Auth
 

@@ -77,7 +77,7 @@ export function Console({ lines, onCommand }: ConsoleProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter RCON command…"
+          placeholder="Enter console command…"
           className="flex-1 bg-transparent font-mono text-sm text-zinc-100 placeholder-zinc-700 focus:outline-none"
           spellCheck={false}
           autoComplete="off"

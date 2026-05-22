@@ -20,10 +20,9 @@ model Server {
   id           Int           @id @default(autoincrement())
   name         String
   host         String
-  port         Int
-  rconPort     Int           @default(4711)
-  rconUser     String        @default("")
-  rconPass     String
+  port         Int           @default(14567)
+  binaryPath   String        @default("/home/bf1942_user/bf1942/bf1942_lnxded")
+  gameDir      String        @default("/home/bf1942_user/bf1942")
   mapRotations MapRotation[]
   bans         Ban[]
   auditLogs    AuditLog[]
@@ -42,7 +41,9 @@ model Ban {
   id         Int      @id @default(autoincrement())
   serverId   Int
   server     Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  banType    String   @default("key")
   playerKey  String
+  ipAddress  String?
   playerName String
   reason     String?
   bannedBy   String

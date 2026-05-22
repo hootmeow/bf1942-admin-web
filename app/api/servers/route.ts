@@ -17,10 +17,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null)
-  const { name, host, port, rconPort, rconUser, rconPass } = body ?? {}
+  const { name, host, port, binaryPath, gameDir } = body ?? {}
 
-  if (!name?.trim() || !host?.trim() || !rconPass?.trim()) {
-    return NextResponse.json({ error: 'name, host, and rconPass are required' }, { status: 400 })
+  if (!name?.trim() || !host?.trim()) {
+    return NextResponse.json({ error: 'name and host are required' }, { status: 400 })
   }
 
   const server = await db.server.create({
@@ -28,9 +28,8 @@ export async function POST(req: NextRequest) {
       name: name.trim(),
       host: host.trim(),
       port: parseInt(port) || 14567,
-      rconPort: parseInt(rconPort) || 4711,
-      rconUser: rconUser?.trim() ?? '',
-      rconPass: rconPass.trim(),
+      binaryPath: binaryPath?.trim() || '/home/bf1942_user/bf1942/bf1942_lnxded',
+      gameDir: gameDir?.trim() || '/home/bf1942_user/bf1942',
     },
   })
 
