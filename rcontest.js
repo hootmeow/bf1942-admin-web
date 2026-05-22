@@ -13,7 +13,7 @@ function tryAuth(user, pass) {
     let buf = Buffer.alloc(0);
     let authSent = false;
     const sock = new net.Socket();
-    sock.setTimeout(3000);
+    sock.setTimeout(6000);
     sock.connect(PORT, HOST);
     sock.on('timeout', () => { console.log('  user=[' + user + '] pass=[' + pass + '] -> TIMEOUT'); sock.destroy(); resolve(); });
     sock.on('data', chunk => {
