@@ -41,15 +41,15 @@ function tryAuth(user, pass) {
 (async () => {
   const combos = [
     ['derpadmin', 'derppassword'],
-    ['derppassword', 'derpadmin'],
-    ['derpadmin', 'derpadmin'],
-    ['derppassword', 'derppassword'],
-    ['admin', 'derppassword'],
-    ['admin', 'derpadmin'],
     ['admin', 'admin'],
+    ['', ''],
+    ['UserName', 'Password'],
+    ['admin', ''],
     ['', 'derppassword'],
-    ['', 'derpadmin'],
-    ['', 'admin'],
+    ['bf1942', 'bf1942'],
+    ['Admin', 'Admin'],
+    ['administrator', 'administrator'],
+    ['rcon', 'rcon'],
   ];
   console.log('Testing ' + combos.length + ' credential combinations against ' + HOST + ':' + PORT);
   for (const [u, p] of combos) await tryAuth(u, p);
