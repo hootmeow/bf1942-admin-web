@@ -65,7 +65,11 @@ export async function connectServer(serverId: number): Promise<BF1942RconClient>
       clearInterval(conn.pollTimer)
       conn.pollTimer = null
     }
-    scheduleReconnect(serverId, conn)
+    // Only reconnect if this client is still the active one for this server.
+    // Prevents duplicate reconnect chains when a failed-auth client is replaced.
+    if (connections.get(serverId)?.client === client) {
+      scheduleReconnect(serverId, conn)
+    }
   })
 
   client.on('authenticated', () => {
@@ -88,7 +92,14 @@ function scheduleReconnect(serverId: number, conn: ManagedConnection): void {
       await connectServer(serverId)
       console.log(`[RCON] Reconnected to server ${serverId}`)
     } catch (err) {
-      console.error(`[RCON] Reconnect failed for server ${serverId}:`, (err as Error).message)
+      const msg = (err as Error).message ?? ''
+      console.error(`[RCON] Reconnect failed for server ${serverId}:`, msg)
+      // Auth failures won't be fixed by retrying — stop the loop.
+      if (msg.includes('authentication failed')) {
+        console.error(`[RCON] Server ${serverId}: stopping reconnect loop — fix credentials in Settings.`)
+        connections.delete(serverId)
+        return
+      }
       conn.backoffMs = Math.min(conn.backoffMs * 2, MAX_BACKOFF_MS)
       scheduleReconnect(serverId, conn)
     }
