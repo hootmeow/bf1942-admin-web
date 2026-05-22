@@ -1,0 +1,62 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        Int        @id @default(autoincrement())
+  username  String     @unique
+  password  String
+  role      String     @default("operator")
+  createdAt DateTime   @default(now())
+  auditLogs AuditLog[]
+}
+
+model Server {
+  id           Int           @id @default(autoincrement())
+  name         String
+  host         String
+  port         Int
+  rconPort     Int           @default(4711)
+  rconUser     String        @default("")
+  rconPass     String
+  mapRotations MapRotation[]
+  bans         Ban[]
+  auditLogs    AuditLog[]
+}
+
+model MapRotation {
+  id       Int     @id @default(autoincrement())
+  serverId Int
+  server   Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  name     String
+  maps     String
+  active   Boolean @default(false)
+}
+
+model Ban {
+  id         Int      @id @default(autoincrement())
+  serverId   Int
+  server     Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  playerKey  String
+  playerName String
+  reason     String?
+  bannedBy   String
+  bannedAt   DateTime @default(now())
+  expiresAt  DateTime?
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  serverId  Int?
+  server    Server?  @relation(fields: [serverId], references: [id])
+  action    String
+  detail    String
+  timestamp DateTime @default(now())
+}
