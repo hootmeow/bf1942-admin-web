@@ -7,45 +7,51 @@ const xor = (d, k) => {
 
 const HOST = '165.245.175.206';
 const PORT = 4711;
-const USER = 'derpadmin';
-const PASS = 'derppassword';
 
-let buf = Buffer.alloc(0);
-let authSent = false;
-const sock = new net.Socket();
-sock.setTimeout(5000);
+function tryAuth(user, pass) {
+  return new Promise(resolve => {
+    let buf = Buffer.alloc(0);
+    let authSent = false;
+    const sock = new net.Socket();
+    sock.setTimeout(3000);
+    sock.connect(PORT, HOST);
+    sock.on('timeout', () => { console.log('  user=[' + user + '] pass=[' + pass + '] -> TIMEOUT'); sock.destroy(); resolve(); });
+    sock.on('data', chunk => {
+      buf = Buffer.concat([buf, chunk]);
+      if (!authSent && buf.length >= 10) {
+        const key = buf.subarray(0, 10);
+        const u = Buffer.from(user, 'latin1');
+        const p = Buffer.from(pass, 'latin1');
+        const lu = Buffer.allocUnsafe(4); lu.writeUInt32LE(u.length, 0);
+        const lp = Buffer.allocUnsafe(4); lp.writeUInt32LE(p.length, 0);
+        sock.write(Buffer.concat([lu, xor(u, key), lp, xor(p, key)]));
+        authSent = true;
+        buf = buf.subarray(10);
+      } else if (authSent && buf.length >= 1) {
+        const b = buf[0];
+        console.log('  user=[' + user + '] pass=[' + pass + '] -> ' + (b === 1 ? '*** SUCCESS ***' : 'FAILED (byte=' + b + ')'));
+        sock.destroy();
+        setTimeout(resolve, 800);
+      }
+    });
+    sock.on('error', e => { console.log('  user=[' + user + '] pass=[' + pass + '] -> ERROR: ' + e.message); setTimeout(resolve, 800); });
+  });
+}
 
-sock.connect(PORT, HOST, () => console.log('TCP connected to ' + HOST + ':' + PORT));
-
-sock.on('timeout', () => {
-  console.log('Timeout - no response from server');
-  sock.destroy();
-});
-
-sock.on('data', chunk => {
-  buf = Buffer.concat([buf, chunk]);
-  console.log('Buffered ' + buf.length + ' bytes');
-
-  if (!authSent && buf.length >= 10) {
-    const key = buf.subarray(0, 10);
-    console.log('XOR key received: ' + key.toString('hex'));
-    const u = Buffer.from(USER, 'latin1');
-    const p = Buffer.from(PASS, 'latin1');
-    const lu = Buffer.allocUnsafe(4);
-    const lp = Buffer.allocUnsafe(4);
-    lu.writeUInt32LE(u.length, 0);
-    lp.writeUInt32LE(p.length, 0);
-    const pkt = Buffer.concat([lu, xor(u, key), lp, xor(p, key)]);
-    console.log('Sending credentials: user=' + USER + ' pass=' + PASS);
-    sock.write(pkt);
-    authSent = true;
-    buf = buf.subarray(10);
-  } else if (authSent && buf.length >= 1) {
-    const b = buf[0];
-    console.log('Auth response byte: ' + b + ' -> ' + (b === 1 ? 'SUCCESS' : 'FAILED'));
-    sock.destroy();
-  }
-});
-
-sock.on('error', e => console.error('Socket error: ' + e.message));
-sock.on('close', () => console.log('Connection closed'));
+(async () => {
+  const combos = [
+    ['derpadmin', 'derppassword'],
+    ['derppassword', 'derpadmin'],
+    ['derpadmin', 'derpadmin'],
+    ['derppassword', 'derppassword'],
+    ['admin', 'derppassword'],
+    ['admin', 'derpadmin'],
+    ['admin', 'admin'],
+    ['', 'derppassword'],
+    ['', 'derpadmin'],
+    ['', 'admin'],
+  ];
+  console.log('Testing ' + combos.length + ' credential combinations against ' + HOST + ':' + PORT);
+  for (const [u, p] of combos) await tryAuth(u, p);
+  console.log('Done.');
+})();
